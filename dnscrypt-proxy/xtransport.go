@@ -220,18 +220,16 @@ func (xTransport *XTransport) rebuildTransport() {
 		tlsClientConfig.Certificates = []tls.Certificate{cert}
 	}
 
-	if xTransport.tlsDisableSessionTickets || xTransport.tlsCipherSuite != nil {
+	if xTransport.tlsDisableSessionTickets != nil {
 		tlsClientConfig.SessionTicketsDisabled = xTransport.tlsDisableSessionTickets
 		if !xTransport.tlsDisableSessionTickets {
 			tlsClientConfig.ClientSessionCache = tls.NewLRUClientSessionCache(10)
 		}
-		if xTransport.tlsCipherSuite != nil {
-			// tlsClientConfig.PreferServerCipherSuites = false
-			tlsClientConfig.CipherSuites = xTransport.tlsCipherSuite
-			tlsClientConfig.MinVersion = tls.VersionTLS13
-			tlsClientConfig.MaxVersion = tls.VersionTLS13
-		}
 	}
+
+	tlsClientConfig.MinVersion = tls.VersionTLS13
+	tlsClientConfig.MaxVersion = tls.VersionTLS13
+
 	transport.TLSClientConfig = &tlsClientConfig
 	if http2Transport, err := http2.ConfigureTransports(transport); err != nil {
 		http2Transport.ReadIdleTimeout = timeout
