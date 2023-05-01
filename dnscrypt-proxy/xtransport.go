@@ -220,7 +220,7 @@ func (xTransport *XTransport) rebuildTransport() {
 		tlsClientConfig.Certificates = []tls.Certificate{cert}
 	}
 
-	if xTransport.tlsDisableSessionTickets != nil {
+	if xTransport.tlsDisableSessionTickets {
 		tlsClientConfig.SessionTicketsDisabled = xTransport.tlsDisableSessionTickets
 		if !xTransport.tlsDisableSessionTickets {
 			tlsClientConfig.ClientSessionCache = tls.NewLRUClientSessionCache(10)
