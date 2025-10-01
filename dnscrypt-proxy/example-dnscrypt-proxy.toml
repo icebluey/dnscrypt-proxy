@@ -276,12 +276,12 @@ cert_refresh_delay = 240
 
 ## DoH: Control the negotiated TLS versions.
 ## Supported values are '1.2' and '1.3'. When unset, dnscrypt-proxy defaults to
-## TLS 1.3 only (equivalent to `tls_min = '1.3'` and `tls_max = '1.3'`).
+## TLS 1.3 only (equivalent to `tls_min_ver = '1.3'` and `tls_max_ver = '1.3'`).
 ## HTTP/3 always uses TLS 1.3; if TLS 1.3 is disabled (for example by setting
-## `tls_max = '1.2'`), HTTP/3 will not be attempted.
+## `tls_max_ver = '1.2'`), HTTP/3 will not be attempted.
 
-# tls_min = '1.3'
-# tls_max = '1.3'
+# tls_min_ver = '1.3'
+# tls_max_ver = '1.3'
 
 
 ## DoH: Use TLS 1.2 and specific cipher suite instead of the server preference
@@ -297,7 +297,7 @@ cert_refresh_delay = 240
 ## and should not be set on regular CPUs.
 ##
 ## This setting only applies when TLS 1.2 is allowed (for example by setting
-## `tls_min = '1.2'`). Keep tls_cipher_suite undefined to let the app
+## `tls_min_ver = '1.2'`). Keep tls_cipher_suite undefined to let the app
 ## automatically choose secure parameters.
 
 # tls_cipher_suite = [52392, 49199]
