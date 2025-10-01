@@ -274,6 +274,16 @@ cert_refresh_delay = 240
 # tls_disable_session_tickets = false
 
 
+## DoH: Control the negotiated TLS versions.
+## Supported values are '1.2' and '1.3'. When unset, dnscrypt-proxy defaults to
+## TLS 1.3 only (equivalent to `tls_min = '1.3'` and `tls_max = '1.3'`).
+## HTTP/3 always uses TLS 1.3; if TLS 1.3 is disabled (for example by setting
+## `tls_max = '1.2'`), HTTP/3 will not be attempted.
+
+# tls_min = '1.3'
+# tls_max = '1.3'
+
+
 ## DoH: Use TLS 1.2 and specific cipher suite instead of the server preference
 ## 49199 = TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
 ## 49195 = TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
@@ -286,7 +296,9 @@ cert_refresh_delay = 240
 ## However, this can cause issues fetching sources or connecting to some HTTP servers,
 ## and should not be set on regular CPUs.
 ##
-## Keep tls_cipher_suite undefined to let the app automatically choose secure parameters.
+## This setting only applies when TLS 1.2 is allowed (for example by setting
+## `tls_min = '1.2'`). Keep tls_cipher_suite undefined to let the app
+## automatically choose secure parameters.
 
 # tls_cipher_suite = [52392, 49199]
 
