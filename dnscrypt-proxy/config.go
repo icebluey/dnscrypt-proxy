@@ -91,6 +91,8 @@ type Config struct {
 	LogMaxBackups            int                         `toml:"log_files_max_backups"`
 	TLSDisableSessionTickets bool                        `toml:"tls_disable_session_tickets"`
 	TLSCipherSuite           []uint16                    `toml:"tls_cipher_suite"`
+	TLSMinVersion            string                      `toml:"tls_min_version"`
+	TLSMaxVersion            string                      `toml:"tls_max_version"`
 	TLSKeyLogFile            string                      `toml:"tls_key_log_file"`
 	NetprobeAddress          string                      `toml:"netprobe_address"`
 	NetprobeTimeout          int                         `toml:"netprobe_timeout"`

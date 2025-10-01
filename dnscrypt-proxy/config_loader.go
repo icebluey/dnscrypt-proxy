@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -67,8 +68,55 @@ func configureXTransport(proxy *Proxy, config *Config) error {
 	proxy.xTransport.tlsDisableSessionTickets = config.TLSDisableSessionTickets
 	proxy.xTransport.tlsCipherSuite = config.TLSCipherSuite
 	proxy.xTransport.mainProto = proxy.mainProto
-	proxy.xTransport.http3 = config.HTTP3
-	proxy.xTransport.http3Probe = config.HTTP3Probe
+
+	parseTLSVersion := func(name, value string) (uint16, error) {
+		trimmed := strings.TrimSpace(value)
+		switch trimmed {
+		case "", "1.3":
+			return tls.VersionTLS13, nil
+		case "1.2":
+			return tls.VersionTLS12, nil
+		default:
+			return 0, fmt.Errorf("unsupported value for %s: %s", name, value)
+		}
+	}
+
+	tlsMinVersion, err := parseTLSVersion("tls_min_version", config.TLSMinVersion)
+	if err != nil {
+		return err
+	}
+	tlsMaxVersion, err := parseTLSVersion("tls_max_version", config.TLSMaxVersion)
+	if err != nil {
+		return err
+	}
+	displayVersion := func(value string) string {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return "1.3"
+		}
+		return trimmed
+	}
+	if tlsMinVersion > tlsMaxVersion {
+		return fmt.Errorf(
+			"tls_min_version (%s) cannot be greater than tls_max_version (%s)",
+			displayVersion(config.TLSMinVersion),
+			displayVersion(config.TLSMaxVersion),
+		)
+	}
+	proxy.xTransport.tlsMinVersion = tlsMinVersion
+	proxy.xTransport.tlsMaxVersion = tlsMaxVersion
+
+	http3Enabled := config.HTTP3
+	http3ProbeEnabled := config.HTTP3Probe
+	if proxy.xTransport.tlsMaxVersion < tls.VersionTLS13 {
+		if http3Enabled || http3ProbeEnabled {
+			dlog.Warn("HTTP/3 requires TLS 1.3 and has been disabled")
+		}
+		http3Enabled = false
+		http3ProbeEnabled = false
+	}
+	proxy.xTransport.http3 = http3Enabled
+	proxy.xTransport.http3Probe = http3ProbeEnabled
 
 	// Configure bootstrap resolvers
 	if len(config.BootstrapResolvers) == 0 && len(config.BootstrapResolversLegacy) > 0 {

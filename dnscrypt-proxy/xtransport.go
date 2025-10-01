@@ -78,6 +78,8 @@ type XTransport struct {
 	http3Probe               bool
 	tlsDisableSessionTickets bool
 	tlsCipherSuite           []uint16
+	tlsMinVersion            uint16
+	tlsMaxVersion            uint16
 	proxyDialer              *netproxy.Dialer
 	httpProxyFunction        func(*http.Request) (*url.URL, error)
 	tlsClientCreds           DOHClientCreds
@@ -101,6 +103,8 @@ func NewXTransport() *XTransport {
 		http3Probe:               false,
 		tlsDisableSessionTickets: false,
 		tlsCipherSuite:           nil,
+		tlsMinVersion:            tls.VersionTLS13,
+		tlsMaxVersion:            tls.VersionTLS13,
 		keyLogWriter:             nil,
 	}
 	return &xTransport
@@ -288,8 +292,8 @@ func (xTransport *XTransport) rebuildTransport() {
 	clientCreds := xTransport.tlsClientCreds
 
 	tlsClientConfig := tls.Config{
-		MinVersion: tls.VersionTLS13,
-		MaxVersion: tls.VersionTLS13,
+		MinVersion: xTransport.tlsMinVersion,
+		MaxVersion: xTransport.tlsMaxVersion,
 	}
 	certPool, certPoolErr := x509.SystemCertPool()
 
@@ -340,7 +344,11 @@ func (xTransport *XTransport) rebuildTransport() {
 		if !xTransport.tlsDisableSessionTickets {
 			tlsClientConfig.ClientSessionCache = tls.NewLRUClientSessionCache(10)
 		}
-		if overrideCipherSuite {
+	}
+	if overrideCipherSuite {
+		if xTransport.tlsMinVersion <= tls.VersionTLS12 {
+			tlsClientConfig.CipherSuites = xTransport.tlsCipherSuite
+		} else {
 			dlog.Notice("Explicit TLS cipher suites configured but ignored: only TLS 1.3 is supported")
 		}
 	}
@@ -350,6 +358,7 @@ func (xTransport *XTransport) rebuildTransport() {
 		http2Transport.AllowHTTP = false
 	}
 	xTransport.transport = transport
+	xTransport.h3Transport = nil
 	if xTransport.http3 {
 		dial := func(ctx context.Context, addrStr string, tlsCfg *tls.Config, cfg *quic.Config) (*quic.Conn, error) {
 			dlog.Debugf("Dialing for H3: [%v]", addrStr)
