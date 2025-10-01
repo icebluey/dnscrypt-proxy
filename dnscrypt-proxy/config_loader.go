@@ -81,11 +81,11 @@ func configureXTransport(proxy *Proxy, config *Config) error {
 		}
 	}
 
-	tlsMinVersion, err := parseTLSVersion("tls_min_version", config.TLSMinVersion)
+	tlsMinVersion, err := parseTLSVersion("tls_min_ver", config.TLSMinVersion)
 	if err != nil {
 		return err
 	}
-	tlsMaxVersion, err := parseTLSVersion("tls_max_version", config.TLSMaxVersion)
+	tlsMaxVersion, err := parseTLSVersion("tls_max_ver", config.TLSMaxVersion)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func configureXTransport(proxy *Proxy, config *Config) error {
 	}
 	if tlsMinVersion > tlsMaxVersion {
 		return fmt.Errorf(
-			"tls_min_version (%s) cannot be greater than tls_max_version (%s)",
+			"tls_min_ver (%s) cannot be greater than tls_max_ver (%s)",
 			displayVersion(config.TLSMinVersion),
 			displayVersion(config.TLSMaxVersion),
 		)
