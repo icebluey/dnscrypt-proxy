@@ -5,6 +5,9 @@ deterministic, non-deterministic with 8-byte tweak, and extended
 non-deterministic with 16-byte tweak.
  - Enhanced pattern rule documentation with better examples.
  - Fixed an issue where nil client addresses could cause crashes.
+ - Added `tls_min`/`tls_max` configuration options for DoH to control the
+   supported TLS versions, defaulting to TLS 1.3 only and documenting how they
+   interact with `tls_cipher_suite` and HTTP/3.
 
 # Version 2.1.13
  - Fixed race conditions in WebSocket handling for the monitoring dashboard,
