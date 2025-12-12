@@ -82,6 +82,7 @@ type Config struct {
 	SourceIPv4               bool                        `toml:"ipv4_servers"`
 	SourceIPv6               bool                        `toml:"ipv6_servers"`
 	MaxClients               uint32                      `toml:"max_clients"`
+	TimeoutLoadReduction     float64                     `toml:"timeout_load_reduction"`
 	BootstrapResolversLegacy []string                    `toml:"fallback_resolvers"`
 	BootstrapResolvers       []string                    `toml:"bootstrap_resolvers"`
 	IgnoreSystemDNS          bool                        `toml:"ignore_system_dns"`
@@ -149,6 +150,7 @@ func newConfig() Config {
 		SourceDoH:                true,
 		SourceODoH:               false,
 		MaxClients:               250,
+		TimeoutLoadReduction:     0.75,
 		BootstrapResolvers:       []string{DefaultBootstrapResolver},
 		IgnoreSystemDNS:          false,
 		LogMaxSize:               10,
@@ -690,14 +692,6 @@ func (config *Config) loadSources(proxy *Proxy) error {
 	if err := proxy.updateRegisteredServers(); err != nil {
 		return err
 	}
-	rs1 := proxy.registeredServers
-	rs2 := proxy.serversInfo.registeredServers
-	rand.Shuffle(len(rs1), func(i, j int) {
-		rs1[i], rs1[j] = rs1[j], rs1[i]
-	})
-	rand.Shuffle(len(rs2), func(i, j int) {
-		rs2[i], rs2[j] = rs2[j], rs2[i]
-	})
 	return nil
 }
 
@@ -776,6 +770,11 @@ func isIPAndPort(addrStr string) error {
 		return fmt.Errorf("Port missing '%s'", addrStr)
 	} else if _, err := strconv.ParseUint(strconv.Itoa(port), 10, 16); err != nil {
 		return fmt.Errorf("Port does not parse '%s' [%v]", addrStr, err)
+	} else if ip.To4() == nil {
+		// IPv6 address must use bracket notation to avoid ambiguity
+		if !strings.HasPrefix(host, "[") || !strings.HasSuffix(host, "]") {
+			return fmt.Errorf("IPv6 addresses must use bracket notation, e.g., [%s]:%d", ip.String(), port)
+		}
 	}
 	return nil
 }

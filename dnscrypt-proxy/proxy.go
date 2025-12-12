@@ -16,6 +16,7 @@ import (
 	clocksmith "github.com/jedisct1/go-clocksmith"
 	stamps "github.com/jedisct1/go-dnsstamps"
 	"golang.org/x/crypto/curve25519"
+	netproxy "golang.org/x/net/proxy"
 )
 
 type Proxy struct {
@@ -86,6 +87,7 @@ type Proxy struct {
 	cacheMaxTTL                   uint32
 	clientsCount                  uint32
 	maxClients                    uint32
+	timeoutLoadReduction          float64
 	cacheMinTTL                   uint32
 	cacheNegMaxTTL                uint32
 	cloakTTL                      uint32
@@ -107,6 +109,7 @@ type Proxy struct {
 	SourceODoH                    bool
 	listenersMu                   sync.Mutex
 	ipCryptConfig                 *IPCryptConfig
+	udpConnPool                   *UDPConnPool
 }
 
 func (proxy *Proxy) registerUDPListener(conn *net.UDPConn) {
@@ -239,7 +242,9 @@ func (proxy *Proxy) addLocalDoHListener(listenAddrStr string) {
 			dlog.Fatalf("Unable to switch to a different user: %v", err)
 		}
 		defer listenerTCP.Close()
+		FileDescriptorsMu.Lock()
 		FileDescriptors = append(FileDescriptors, fdTCP)
+		FileDescriptorsMu.Unlock()
 		return
 	}
 
@@ -297,9 +302,7 @@ func (proxy *Proxy) StartProxy() {
 	if proxy.showCerts {
 		os.Exit(0)
 	}
-	if liveServers > 0 {
-		dlog.Noticef("dnscrypt-proxy is ready - live servers: %d", liveServers)
-	} else if err != nil {
+	if liveServers <= 0 {
 		dlog.Error(err)
 		dlog.Notice("dnscrypt-proxy is waiting for at least one server to be reachable")
 	}
@@ -443,6 +446,7 @@ func (proxy *Proxy) udpListener(clientPc *net.UDPConn) {
 		packet := buffer[:length]
 		if !proxy.clientsCountInc() {
 			dlog.Warnf("Too many incoming connections (max=%d)", proxy.maxClients)
+			dlog.Debugf("Number of goroutines: %d", runtime.NumGoroutine())
 			proxy.processIncomingQuery(
 				"udp",
 				proxy.mainProto,
@@ -470,13 +474,15 @@ func (proxy *Proxy) tcpListener(acceptPc *net.TCPListener) {
 		}
 		if !proxy.clientsCountInc() {
 			dlog.Warnf("Too many incoming connections (max=%d)", proxy.maxClients)
+			dlog.Debugf("Number of goroutines: %d", runtime.NumGoroutine())
 			clientPc.Close()
 			continue
 		}
 		go func() {
 			defer clientPc.Close()
 			defer proxy.clientsCountDec()
-			if err := clientPc.SetDeadline(time.Now().Add(proxy.timeout)); err != nil {
+			dynamicTimeout := proxy.getDynamicTimeout()
+			if err := clientPc.SetDeadline(time.Now().Add(dynamicTimeout)); err != nil {
 				return
 			}
 			start := time.Now()
@@ -585,18 +591,68 @@ func (proxy *Proxy) exchangeWithUDPServer(
 	if serverInfo.Relay != nil && serverInfo.Relay.Dnscrypt != nil {
 		upstreamAddr = serverInfo.Relay.Dnscrypt.RelayUDPAddr
 	}
-	var err error
-	var pc net.Conn
+
 	proxyDialer := proxy.xTransport.proxyDialer
-	if proxyDialer == nil {
-		pc, err = net.DialTimeout("udp", upstreamAddr.String(), serverInfo.Timeout)
-	} else {
-		pc, err = (*proxyDialer).Dial("udp", upstreamAddr.String())
+	if proxyDialer != nil {
+		return proxy.exchangeWithUDPServerViaProxy(serverInfo, sharedKey, encryptedQuery, clientNonce, upstreamAddr, proxyDialer)
 	}
+
+	pc, err := proxy.udpConnPool.Get(upstreamAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := pc.SetDeadline(time.Now().Add(serverInfo.Timeout)); err != nil {
+		proxy.udpConnPool.Discard(pc)
+		return nil, err
+	}
+
+	query := encryptedQuery
+	if serverInfo.Relay != nil && serverInfo.Relay.Dnscrypt != nil {
+		proxy.prepareForRelay(serverInfo.UDPAddr.IP, serverInfo.UDPAddr.Port, &query)
+	}
+
+	encryptedResponse := make([]byte, MaxDNSPacketSize)
+	var readErr error
+	for tries := 2; tries > 0; tries-- {
+		if _, err := pc.Write(query); err != nil {
+			proxy.udpConnPool.Discard(pc)
+			return nil, err
+		}
+		length, err := pc.Read(encryptedResponse)
+		if err == nil {
+			encryptedResponse = encryptedResponse[:length]
+			readErr = nil
+			break
+		}
+		readErr = err
+		dlog.Debugf("[%v] Retry on timeout", serverInfo.Name)
+	}
+
+	if readErr != nil {
+		proxy.udpConnPool.Discard(pc)
+		return nil, readErr
+	}
+
+	proxy.udpConnPool.Put(upstreamAddr, pc)
+
+	return proxy.Decrypt(serverInfo, sharedKey, encryptedResponse, clientNonce)
+}
+
+func (proxy *Proxy) exchangeWithUDPServerViaProxy(
+	serverInfo *ServerInfo,
+	sharedKey *[32]byte,
+	encryptedQuery []byte,
+	clientNonce []byte,
+	upstreamAddr *net.UDPAddr,
+	proxyDialer *netproxy.Dialer,
+) ([]byte, error) {
+	pc, err := (*proxyDialer).Dial("udp", upstreamAddr.String())
 	if err != nil {
 		return nil, err
 	}
 	defer pc.Close()
+
 	if err := pc.SetDeadline(time.Now().Add(serverInfo.Timeout)); err != nil {
 		return nil, err
 	}
@@ -688,6 +744,27 @@ func (proxy *Proxy) clientsCountDec() {
 	}
 }
 
+func (proxy *Proxy) getDynamicTimeout() time.Duration {
+	if proxy.timeoutLoadReduction <= 0.0 || proxy.maxClients == 0 {
+		return proxy.timeout
+	}
+
+	currentClients := atomic.LoadUint32(&proxy.clientsCount)
+	utilization := float64(currentClients) / float64(proxy.maxClients)
+
+	// Use quartic (power 4) curve for slow decrease at low load, sharp decrease near limit
+	utilization4 := utilization * utilization * utilization * utilization
+	factor := 1.0 - (utilization4 * proxy.timeoutLoadReduction)
+	if factor < 0.1 {
+		factor = 0.1
+	}
+
+	dynamicTimeout := time.Duration(float64(proxy.timeout) * factor)
+	dlog.Debugf("Dynamic timeout: %v (utilization: %.2f%%, factor: %.2f)", dynamicTimeout, utilization*100, factor)
+
+	return dynamicTimeout
+}
+
 func (proxy *Proxy) processIncomingQuery(
 	clientProto string,
 	serverProto string,
@@ -717,7 +794,7 @@ func (proxy *Proxy) processIncomingQuery(
 	var serverName string = "-"
 
 	// Apply query plugins with lazy server selection
-	query, _ = pluginsState.ApplyQueryPlugins(
+	query, err := pluginsState.ApplyQueryPlugins(
 		&proxy.pluginsGlobals,
 		query,
 		func() (*ServerInfo, bool) {
@@ -736,6 +813,13 @@ func (proxy *Proxy) processIncomingQuery(
 			return serverInfo, needsPadding
 		},
 	)
+	if err != nil {
+		dlog.Debugf("Plugins failed: %v", err)
+		pluginsState.action = PluginsActionDrop
+		pluginsState.returnCode = PluginsReturnCodeDrop
+		pluginsState.ApplyLoggingPlugins(&proxy.pluginsGlobals)
+		return response
+	}
 	if !validateQuery(query) {
 		return response
 	}
@@ -748,7 +832,6 @@ func (proxy *Proxy) processIncomingQuery(
 	}
 
 	// Handle synthesized responses from plugins
-	var err error
 	if pluginsState.synthResponse != nil {
 		response, err = handleSynthesizedResponse(&pluginsState, pluginsState.synthResponse)
 		if err != nil {
@@ -827,5 +910,6 @@ func (proxy *Proxy) processIncomingQuery(
 func NewProxy() *Proxy {
 	return &Proxy{
 		serversInfo: NewServersInfo(),
+		udpConnPool: NewUDPConnPool(),
 	}
 }
