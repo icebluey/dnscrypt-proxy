@@ -44,6 +44,7 @@ type Config struct {
 	CertIgnoreTimestamp      bool               `toml:"cert_ignore_timestamp"`
 	EphemeralKeys            bool               `toml:"dnscrypt_ephemeral_keys"`
 	LBStrategy               string             `toml:"lb_strategy"`
+	UpstreamMode             string             `toml:"upstream_mode"`
 	LBEstimator              bool               `toml:"lb_estimator"`
 	BlockIPv6                bool               `toml:"block_ipv6"`
 	BlockUnqualified         bool               `toml:"block_unqualified"`
@@ -166,6 +167,7 @@ func newConfig() Config {
 		NetprobeTimeout:          60,
 		OfflineMode:              false,
 		RefusedCodeInResponses:   false,
+		UpstreamMode:             "",
 		LBEstimator:              true,
 		BlockedQueryResponse:     "hinfo",
 		BrokenImplementations: BrokenImplementationsConfig{

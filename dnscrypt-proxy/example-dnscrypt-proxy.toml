@@ -187,6 +187,13 @@ keepalive = 30
 
 # lb_strategy = 'wp2'
 
+## Upstream mode: only `parallel` is supported.
+## By default (unset), dnscrypt-proxy keeps using `lb_strategy`.
+## Set this to `parallel` to query all configured upstreams concurrently
+## and return the first successful response.
+
+# upstream_mode = 'parallel'
+
 ## Set to `true` to constantly try to estimate the latency of all the resolvers
 ## and adjust the load-balancing parameters accordingly, or to `false` to disable.
 ## Default is `true` that makes 'p2' `lb_strategy` work well.

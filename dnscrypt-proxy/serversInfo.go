@@ -371,6 +371,20 @@ func (serversInfo *ServersInfo) getOne() *ServerInfo {
 	return serverInfo
 }
 
+func (serversInfo *ServersInfo) getAll() []*ServerInfo {
+	serversInfo.RLock()
+	defer serversInfo.RUnlock()
+
+	if len(serversInfo.inner) == 0 {
+		return nil
+	}
+
+	all := make([]*ServerInfo, len(serversInfo.inner))
+	copy(all, serversInfo.inner)
+
+	return all
+}
+
 // getWeightedCandidate implements the WP2 algorithm
 func (serversInfo *ServersInfo) getWeightedCandidate(serversCount int) int {
 	if serversCount <= 1 {

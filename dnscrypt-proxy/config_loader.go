@@ -173,6 +173,15 @@ func configureServerParams(proxy *Proxy, config *Config) {
 	proxy.blockedQueryResponse = config.BlockedQueryResponse
 	proxy.timeout = time.Duration(config.Timeout) * time.Millisecond
 	proxy.maxClients = config.MaxClients
+	if upstreamMode, ok := parseUpstreamMode(config.UpstreamMode); ok {
+		proxy.upstreamMode = upstreamMode
+		if proxy.upstreamMode == UpstreamModeParallel {
+			dlog.Noticef("Using upstream_mode=[%s] for main upstream queries", UpstreamModeParallel)
+		}
+	} else {
+		dlog.Warnf("Unknown upstream_mode: [%s], only [%s] is supported; falling back to lb_strategy flow", config.UpstreamMode, UpstreamModeParallel)
+		proxy.upstreamMode = ""
+	}
 	proxy.timeoutLoadReduction = config.TimeoutLoadReduction
 	if proxy.timeoutLoadReduction < 0.0 || proxy.timeoutLoadReduction > 1.0 {
 		dlog.Warnf("timeout_load_reduction must be between 0.0 and 1.0, using default 0.75")
@@ -195,6 +204,19 @@ func configureServerParams(proxy *Proxy, config *Config) {
 // configureLoadBalancing - Configures load balancing strategy
 func configureLoadBalancing(proxy *Proxy, config *Config) {
 	lbStrategy := LBStrategy(DefaultLBStrategy)
+	if proxy.upstreamMode == UpstreamModeParallel {
+		if lbStrategyStr := strings.TrimSpace(config.LBStrategy); lbStrategyStr != "" {
+			dlog.Noticef(
+				"upstream_mode=[%s] is enabled; lb_strategy=[%s] is ignored for main upstream queries",
+				UpstreamModeParallel,
+				config.LBStrategy,
+			)
+		}
+		proxy.serversInfo.lbStrategy = lbStrategy
+		proxy.serversInfo.lbEstimator = config.LBEstimator
+		return
+	}
+
 	switch lbStrategyStr := strings.ToLower(config.LBStrategy); lbStrategyStr {
 	case "":
 		// default - WP2 is now the default strategy

@@ -101,6 +101,7 @@ type Proxy struct {
 	anonDirectCertFallback        bool
 	pluginBlockUndelegated        bool
 	child                         bool
+	upstreamMode                  UpstreamMode
 	SourceIPv4                    bool
 	SourceIPv6                    bool
 	SourceDNSCrypt                bool
@@ -799,11 +800,34 @@ func (proxy *Proxy) processIncomingQuery(
 		func() (*ServerInfo, bool) {
 			// Only get server info once when actually needed
 			if serverInfo == nil {
-				serverInfo = proxy.serversInfo.getOne()
+				if proxy.upstreamMode == UpstreamModeParallel {
+					servers := proxy.serversInfo.getAll()
+					if len(servers) > 0 {
+						serverInfo = servers[0]
+					}
+				} else {
+					serverInfo = proxy.serversInfo.getOne()
+				}
 				if serverInfo != nil {
 					serverName = serverInfo.Name
 				}
 			}
+			if proxy.upstreamMode == UpstreamModeParallel {
+				servers := proxy.serversInfo.getAll()
+				if len(servers) == 0 {
+					return nil, false
+				}
+				needsPadding := false
+				for _, candidate := range servers {
+					if candidate != nil &&
+						(candidate.Proto == stamps.StampProtoTypeDoH || candidate.Proto == stamps.StampProtoTypeTLS) {
+						needsPadding = true
+						break
+					}
+				}
+				return serverInfo, needsPadding
+			}
+
 			if serverInfo == nil {
 				return nil, false
 			}
@@ -849,30 +873,53 @@ func (proxy *Proxy) processIncomingQuery(
 	// Process query with a DNS server if there's no cached response
 	// Note: if serverInfo is still nil here, we need to get it
 	if len(response) == 0 {
-		if serverInfo == nil {
-			serverInfo = proxy.serversInfo.getOne()
-			if serverInfo != nil {
+		if proxy.upstreamMode == UpstreamModeParallel {
+			exchangeResponse, selectedServer, err := handleDNSExchangeParallel(proxy, &pluginsState, query, serverProto)
+			if selectedServer != nil {
+				serverInfo = selectedServer
 				serverName = serverInfo.Name
+				pluginsState.serverName = serverName
+				if serverInfo.Relay != nil {
+					pluginsState.relayName = serverInfo.Relay.Name
+				}
 			}
-		}
-		if serverInfo != nil {
-			pluginsState.serverName = serverName
-			if serverInfo.Relay != nil {
-				pluginsState.relayName = serverInfo.Relay.Name
-			}
-
-			exchangeResponse, err := handleDNSExchange(proxy, serverInfo, &pluginsState, query, serverProto)
-
-			// Update server statistics for WP2 strategy
-			success := (err == nil && exchangeResponse != nil)
-			proxy.serversInfo.updateServerStats(serverName, success)
 
 			if err != nil || exchangeResponse == nil {
 				return response
 			}
-
 			response = exchangeResponse
+		} else {
+			if serverInfo == nil {
+				serverInfo = proxy.serversInfo.getOne()
+				if serverInfo != nil {
+					serverName = serverInfo.Name
+				}
+			}
+			if serverInfo == nil {
+				// Keep the empty response and continue to the common response
+				// validation path so NOT_READY is logged consistently.
+			}
+			if serverInfo != nil {
+				pluginsState.serverName = serverName
+				if serverInfo.Relay != nil {
+					pluginsState.relayName = serverInfo.Relay.Name
+				}
 
+				exchangeResponse, err := handleDNSExchange(proxy, serverInfo, &pluginsState, query, serverProto)
+
+				// Update server statistics for WP2 strategy
+				success := (err == nil && exchangeResponse != nil)
+				proxy.serversInfo.updateServerStats(serverName, success)
+
+				if err != nil || exchangeResponse == nil {
+					return response
+				}
+
+				response = exchangeResponse
+			}
+		}
+
+		if serverInfo != nil {
 			// Process the response through plugins
 			processedResponse, err := processPlugins(proxy, &pluginsState, query, serverInfo, response)
 			if err != nil {
