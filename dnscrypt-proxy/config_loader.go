@@ -207,8 +207,7 @@ func configureLoadBalancing(proxy *Proxy, config *Config) {
 	if proxy.upstreamMode == UpstreamModeParallel {
 		if lbStrategyStr := strings.TrimSpace(config.LBStrategy); lbStrategyStr != "" {
 			dlog.Noticef(
-				"upstream_mode=[%s] is enabled; lb_strategy=[%s] is ignored for main upstream queries",
-				UpstreamModeParallel,
+				"lb_strategy=[%s] is ignored for main upstream queries",
 				config.LBStrategy,
 			)
 		}
